@@ -1,0 +1,6 @@
+﻿services:
+  search.webapi:
+    image: search.webapi
+    build:
+      context: .
+      dockerfile: Src/Search.WebApi/Dockerfile
