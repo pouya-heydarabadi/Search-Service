@@ -8,6 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
+        <PackageReference Include="Elastic.Clients.Elasticsearch" Version="8.17.1" />
         <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="9.0.1" />
         <PackageReference Include="MongoDB.Driver" Version="3.2.1" />
         <PackageReference Include="Scalar.AspNetCore" Version="2.0.18" />

@@ -1,5 +1,8 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Elastic.Clients.Elasticsearch;
+using Elastic.Clients.Elasticsearch.Core.Bulk;
+using Elastic.Transport;
 using Scalar.AspNetCore;
 using Search.WebApi.Domain.Products.Entities;
 using Search.WebApi.Infrastructure.Services;
@@ -7,16 +10,19 @@ using Search.WebApi.Infrastructure.Services;
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Services.AddOpenApi();
-builder.Services.ConfigureHttpJsonOptions(options =>
-{
-    options.SerializerOptions.MaxDepth = 5;
-    options.SerializerOptions.PropertyNamingPolicy = JsonNamingPolicy.CamelCase;
-    options.SerializerOptions.IgnoreNullValues = true;
-    options.SerializerOptions.ReferenceHandler = ReferenceHandler.IgnoreCycles;
-});
 
 builder.Services.AddSingleton<ProductService>();
 builder.WebHost.UseUrls("http://192.168.242.11:7000/");
+
+var settings = new ElasticsearchClientSettings(new Uri("https://localhost:9200"))
+    .CertificateFingerprint(builder.Configuration["Elasticsearch:Fingerprint"])
+    .Authentication(new BasicAuthentication( builder.Configuration["Elasticsearch:UserName"],builder.Configuration["Elasticsearch:Password"] ));
+var client = new ElasticsearchClient(settings);
+
+builder.Services.AddSingleton<ElasticsearchClient>(options =>
+{
+  return  client = new ElasticsearchClient(settings);
+});
 
 var app = builder.Build();
 
@@ -44,9 +50,16 @@ app.MapGet("/products/{id}", async (int id, ProductService service) =>
     return product is not null ? Results.Ok(product) : Results.NotFound();
 });
 
-app.MapPost("/products", async (List<Product> products, ProductService service) =>
+app.MapPost("/products", async (List<Product> products, ElasticsearchClient _elasticsearch ,ProductService service, CancellationToken CancellationToken) =>
 {
-    products.ForEach(x=> _ = service.CreateAsync(x));
+    await Task.WhenAll(products.Select(product => service.CreateAsync(product)));
+
+    var bulkRequest = new BulkRequest("products")
+    {
+        Operations = new BulkOperationsCollection(products.Select(p => new BulkIndexOperation<Product>(p)).ToList())
+    };
+
+    var response = await _elasticsearch.BulkAsync(bulkRequest, CancellationToken);
     return Results.Created();
 });
 
@@ -69,6 +82,28 @@ app.MapDelete("/products/{id}", async (int id, ProductService service) =>
     await service.DeleteAsync(id);
     return Results.NoContent();
 });
+
+#endregion
+
+#region Search
+
+app.MapGet("/Products/FuzzySearch/", async (ElasticsearchClient _elasticsearch, string query) =>
+{
+    var result = await _elasticsearch.SearchAsync<Product>(x =>
+        x.Index("products")
+            .Query(q => q.Fuzzy(f => f.Field(field => field.Name)
+                .Value(query)
+            )));
+
+    if (result.IsValidResponse)
+    {
+        return Results.Ok(result.Documents.ToList());
+    }
+    return Results.BadRequest();
+});
+
+
+
 
 #endregion
 
